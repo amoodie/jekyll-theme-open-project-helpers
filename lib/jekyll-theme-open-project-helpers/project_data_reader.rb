@@ -84,9 +84,11 @@ module Jekyll
 
       def fetch_hub_logo
         if @site.config.key? 'parent_hub' and @site.config['parent_hub'].key? 'git_repo_url'
+          parent_hub_repo_branch = @site.config['parent_hub']['git_repo_branch'] || DEFAULT_REPO_BRANCH
           git_shallow_checkout(
             File.join(@site.source, 'parent-hub'),
             @site.config['parent_hub']['git_repo_url'],
+            parent_hub_repo_branch,
             ['assets', 'title.html'])
         end
       end
@@ -98,10 +100,13 @@ module Jekyll
         end
         project_indexes.each do |project|
           project_path = project.path.split('/')[0..-2].join('/')
+          project_repo_url = project['site']['git_repo_url']
+          project_repo_branch = project['site']['git_repo_branch'] || DEFAULT_REPO_BRANCH
 
           git_shallow_checkout(
             project_path,
-            project['site']['git_repo_url'],
+            project_repo_url,
+            project_repo_branch,
             ['assets', '_posts', '_software', '_specs'])
 
           CollectionDocReader.new(site).read(
@@ -119,6 +124,7 @@ module Jekyll
         repo_checkout = nil
         src = index_doc.data['spec_source']
         repo_url = src['git_repo_url']
+        repo_branch = src['git_repo_branch'] || DEFAULT_REPO_BRANCH
         repo_subtree = src['git_repo_subtree']
         build = src['build']
         engine = build['engine']
@@ -132,7 +138,7 @@ module Jekyll
                     end
 
         begin
-          repo_checkout = git_shallow_checkout(spec_checkout_path, repo_url, [repo_subtree])
+          repo_checkout = git_shallow_checkout(spec_checkout_path, repo_url, repo_branch, [repo_subtree])
         rescue
           repo_checkout = nil
         end
@@ -192,12 +198,13 @@ module Jekyll
           main_repo = index_doc.data['repo_url']
 
           sw_docs_repo = (if docs then docs['git_repo_url'] end) || main_repo
+          sw_docs_branch = (if docs then docs['git_repo_branch'] end) || DEFAULT_REPO_BRANCH
           sw_docs_subtree = (if docs then docs['git_repo_subtree'] end) || DEFAULT_DOCS_SUBTREE
 
           docs_path = "#{index_doc.path.split('/')[0..-2].join('/')}/#{item_name}"
 
           begin
-            sw_docs_checkout = git_shallow_checkout(docs_path, sw_docs_repo, [sw_docs_subtree])
+            sw_docs_checkout = git_shallow_checkout(docs_path, sw_docs_repo, sw_docs_branch, [sw_docs_subtree])
           rescue
             sw_docs_checkout = nil 
           end
@@ -213,7 +220,7 @@ module Jekyll
           # unless it’s the same as the repo where docs are.
           if sw_docs_checkout == nil or sw_docs_repo != main_repo
             repo_path = "#{index_doc.path.split('/')[0..-2].join('/')}/_#{item_name}_repo"
-            repo_checkout = git_shallow_checkout(repo_path, main_repo)
+            repo_checkout = git_shallow_checkout(repo_path, DEFAULT_REPO_BRANCH, main_repo)
             index_doc.merge_data!({ 'last_update' => repo_checkout[:modified_at] })
           else
             index_doc.merge_data!({ 'last_update' => sw_docs_checkout[:modified_at] })
@@ -221,7 +228,7 @@ module Jekyll
         end
       end
 
-      def git_shallow_checkout(repo_path, remote_url, sparse_subtrees=[])
+      def git_shallow_checkout(repo_path, remote_url, remote_branch, sparse_subtrees=[])
         # Returns hash with timestamp of latest repo commit
         # and boolean signifying whether new repo has been initialized
         # in the process of pulling the data.
@@ -266,11 +273,11 @@ module Jekyll
         if refresh_condition == 'always'
           repo.fetch(DEFAULT_REPO_REMOTE_NAME, { :depth => 1 })
           repo.reset_hard
-          repo.checkout("#{DEFAULT_REPO_REMOTE_NAME}/#{DEFAULT_REPO_BRANCH}", { :f => true })
+          repo.checkout("#{DEFAULT_REPO_REMOTE_NAME}/#{remote_branch}", { :f => true })
 
         elsif refresh_condition == 'last-resort'
           begin
-            repo.checkout("#{DEFAULT_REPO_REMOTE_NAME}/#{DEFAULT_REPO_BRANCH}", { :f => true })
+            repo.checkout("#{DEFAULT_REPO_REMOTE_NAME}/#{remote_branch}", { :f => true })
           rescue Exception => e
             if e.message.include? "Sparse checkout leaves no entry on working directory"
               # Supposedly, software docs are missing! No big deal.
@@ -281,7 +288,7 @@ module Jekyll
               }
             else
               repo.fetch(DEFAULT_REPO_REMOTE_NAME, { :depth => 1 })
-              repo.checkout("#{DEFAULT_REPO_REMOTE_NAME}/#{DEFAULT_REPO_BRANCH}", { :f => true })
+              repo.checkout("#{DEFAULT_REPO_REMOTE_NAME}/#{remote_branch}", { :f => true })
             end
           end
         end
